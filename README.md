@@ -1,1 +1,224 @@
-# dexlgm.github.io
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bytebeat Composer</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #743664;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #ff82e0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #ffffff;
+            text-shadow: #ffffff 0px 0px 5px;
+            text-shadow: #ffffff 0px, 0px, 10px;
+            text-shadow: #ffffff 0px 0px 15px;
+            margin-bottom: 20px;
+        }
+
+        textarea, select {
+            width: 100%;
+            max-width: 500px;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .controls div {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .controls button {
+            border: none;
+            background-color: #af4ca2;
+            color: white;
+            padding: 10px 20px;
+            margin: 0 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .controls button:hover {
+            background-color: #a04598;
+        }
+
+        .controls button:active {
+            background-color: #8e388e;
+        }
+
+        .controls label {
+            margin-right: 10px;
+            color: #fedfff;
+        }
+        .controls input{
+            color: rebeccapurple;
+        }
+
+        .controls input[type="range"] {
+            width: 300px;
+        }
+
+        canvas {
+            border: 1px solid #000000;
+            border-radius: 4px;
+            margin-top: 20px;
+            background: #f7beff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bytebeat Composer</h1>
+        <textarea id="formula" cols="50" rows="4">t*(t>>12|t>>8)&63&t>>4</textarea>
+        <select id="sampleRate">
+            <option value="8000">8000 Hz</option>
+            <option value="11025">11025 Hz</option>
+            <option value="16000">16000 Hz</option>
+            <option value="22050">22050 Hz</option>
+            <option value="32000">32000 Hz</option>
+            <option value="44100" selected>44100 Hz</option>
+        </select>
+        <div class="controls">
+            <div>
+                <button onclick="startBytebeat()">Play</button>
+                <button id="pauseButton" onclick="pauseBytebeat()">Pause</button>
+                <button onclick="resetBytebeat()">Stop and Return to Start</button>
+            </div>
+            <div>
+                <label for="volume">Volume:</label>
+                <input type="range" id="volume" min="0" max="100" value="50">
+            </div>
+        </div>
+        <canvas id="visualizer" width="800" height="200"></canvas>
+    </div>
+
+    <script>
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+        let scriptNode;
+        let analyser;
+        let bufferLength;
+        let dataArray;
+        let t = 0;
+        let isPlaying = false;
+
+        function bytebeatFormula(t) {
+            const formula = document.getElementById('formula').value;
+            return eval(formula);
+        }
+
+        function startBytebeat() {
+            if (isPlaying) return;
+
+            audioCtx = new AudioContext();
+            const sampleRate = parseInt(document.getElementById('sampleRate').value);
+            audioCtx.close();
+            audioCtx = new AudioContext({ sampleRate });
+
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+
+            scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+            scriptNode.onaudioprocess = function (e) {
+                const output = e.outputBuffer.getChannelData(0);
+                const volume = document.getElementById('volume').value / 100;
+                for (let i = 0; i < output.length; i++) {
+                    output[i] = ((bytebeatFormula(t) & 255) / 128 - 1) * volume;
+                    t++;
+                }
+            };
+
+            scriptNode.connect(audioCtx.destination);
+            scriptNode.connect(analyser);
+            isPlaying = true;
+
+            visualize();
+        }
+
+        function pauseBytebeat() {
+            const pauseButton = document.getElementById('pauseButton');
+            if (pauseButton.innerText === "Pause") {
+                pauseButton.innerText = "Play";
+                if (isPlaying) {
+                    scriptNode.disconnect();
+                    audioCtx.close();
+                    isPlaying = false;
+                }
+            } else {
+                pauseButton.innerText = "Pause";
+                startBytebeat();
+            }
+        }
+
+        function resetBytebeat() {
+            pauseBytebeat();
+            t = 0;
+            pauseBytebeat();
+        }
+
+        function visualize() {
+            const canvas = document.getElementById('visualizer');
+            const canvasCtx = canvas.getContext('2d');
+
+            function draw() {
+                if (!isPlaying) return;
+                requestAnimationFrame(draw);
+                analyser.getByteTimeDomainData(dataArray);
+
+                canvasCtx.fillStyle = 'white';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+                canvasCtx.lineWidth = 2;
+                canvasCtx.strokeStyle = 'black';
+                canvasCtx.beginPath();
+                const sliceWidth = canvas.width * 1.0 / bufferLength;
+                let x = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * canvas.height / 2;
+                    if (i === 0) {
+                        canvasCtx.moveTo(x, y);
+                    } else {
+                        canvasCtx.lineTo(x, y);
+                    }
+                    x += sliceWidth;
+                }
+                canvasCtx.lineTo(canvas.width, canvas.height / 2);
+                canvasCtx.stroke();
+            }
+
+            draw();
+        }
+    </script>
+</body>
+</html>
